@@ -1,0 +1,349 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mehar Racing</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;background:#10131c;color:white;
+  font-family:Arial,sans-serif;text-align:center;
+  overflow:hidden;user-select:none
+}
+header{padding:10px;background:#171d2a}
+h1{margin:2px;color:#ffd43b;font-size:26px}
+header p{margin:5px;font-size:12px;color:#bdc6d8}
+#stats{
+ display:flex;justify-content:space-around;
+ padding:10px;background:#20283a;font-weight:bold
+}
+canvas{
+ display:block;margin:auto;background:#333;
+ width:min(100vw,440px);
+ height:calc(100dvh - 240px);
+ min-height:300px;max-height:650px;
+ touch-action:none
+}
+.controls{
+ display:flex;justify-content:center;gap:20px;
+ padding:9px;background:#171d2a
+}
+button{
+ border:0;border-radius:12px;padding:13px 23px;
+ font-size:17px;font-weight:bold;cursor:pointer;
+ color:white;background:#34415b;touch-action:manipulation
+}
+button:active{transform:scale(.94);background:#536789}
+#start{background:#f0b90b;color:#171717}
+#message{
+ position:fixed;inset:0;display:flex;
+ align-items:center;justify-content:center;
+ background:#0009;z-index:5
+}
+.panel{
+ background:#171d2a;border:2px solid #ffd43b;
+ border-radius:20px;padding:25px;width:min(90%,340px)
+}
+.panel h2{color:#ffd43b;font-size:30px;margin:5px}
+.panel p{line-height:1.6;color:#d7deeb}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏎️ MEHAR RACING</h1>
+  <p>HIGH SPEED • DODGE TRAFFIC • BE THE CHAMPION</p>
+</header>
+
+<div id="stats">
+ <span>🏆 Score: <b id="score">0</b></span>
+ <span>🚀 Speed: <b id="speed">1</b></span>
+ <span>🥇 Best: <b id="best">0</b></span>
+</div>
+
+<canvas id="game" width="440" height="650"></canvas>
+
+<div class="controls">
+ <button id="left">⬅ LEFT</button>
+ <button id="start">▶ START</button>
+ <button id="right">RIGHT ➡</button>
+</div>
+
+<div id="message">
+ <div class="panel">
+  <h2>MEHAR RACING</h2>
+  <p>Traffic se bach kar drive karo aur apna high score banao!</p>
+  <p>⌨️ Keyboard: ← → ya A / D<br>
+  📱 Mobile: LEFT / RIGHT buttons</p>
+  <button id="play">START GAME 🚗</button>
+ </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const scoreEl = document.getElementById("score");
+const speedEl = document.getElementById("speed");
+const bestEl = document.getElementById("best");
+const message = document.getElementById("message");
+
+let best = 0;
+try { best = Number(localStorage.getItem("meharBest")) || 0; }
+catch(e) {}
+bestEl.textContent = best;
+
+const road = {x:55, width:330};
+const car = {x:196,y:510,w:48,h:82};
+let traffic = [];
+let score = 0;
+let speed = 4;
+let running = false;
+let gameOver = false;
+let frame = 0;
+let roadOffset = 0;
+let left = false, right = false;
+let lastTime = 0;
+
+function roundedRect(x,y,w,h,r,color){
+ ctx.fillStyle=color;
+ ctx.beginPath();
+ ctx.roundRect(x,y,w,h,r);
+ ctx.fill();
+}
+
+function drawCar(x,y,w,h,color,isPlayer=false){
+ // Shadow
+ ctx.fillStyle="#0005";
+ ctx.fillRect(x+4,y+8,w,h);
+
+ // Wheels
+ roundedRect(x-5,y+13,8,22,3,"#111");
+ roundedRect(x+w-3,y+13,8,22,3,"#111");
+ roundedRect(x-5,y+h-32,8,22,3,"#111");
+ roundedRect(x+w-3,y+h-32,8,22,3,"#111");
+
+ // Car body
+ roundedRect(x,y,w,h,10,color);
+
+ // Windows
+ roundedRect(x+7,y+15,w-14,22,5,"#a9e8ff");
+ roundedRect(x+8,y+45,w-16,18,4,"#25374c");
+
+ // Lights
+ roundedRect(x+4,y+3,11,6,2,"#fff4b0");
+ roundedRect(x+w-15,y+3,11,6,2,"#fff4b0");
+ roundedRect(x+4,y+h-9,10,5,2,"#ff3333");
+ roundedRect(x+w-14,y+h-9,10,5,2,"#ff3333");
+
+ if(isPlayer){
+  roundedRect(x+17,y+35,14,5,2,"#ffd43b");
+ }
+}
+
+function drawRoad(){
+ // Grass
+ ctx.fillStyle="#287344";
+ ctx.fillRect(0,0,440,650);
+
+ // Grass stripes
+ for(let y=-40+(roadOffset%80);y<650;y+=80){
+  ctx.fillStyle="#32854e";
+  ctx.fillRect(0,y,45,40);
+  ctx.fillRect(395,y,45,40);
+ }
+
+ // Road
+ ctx.fillStyle="#424750";
+ ctx.fillRect(road.x,0,road.width,650);
+
+ // Road edges
+ ctx.fillStyle="#f4f4f4";
+ ctx.fillRect(road.x,0,5,650);
+ ctx.fillRect(road.x+road.width-5,0,5,650);
+
+ // Road lane dividers
+ ctx.fillStyle="#eeeeee";
+ for(let y=-70+(roadOffset%90);y<650;y+=90){
+  ctx.fillRect(162,y,5,48);
+  ctx.fillRect(273,y,5,48);
+ }
+}
+
+function spawnTraffic(){
+ const lanes=[83,194,305];
+ const lane=lanes[Math.floor(Math.random()*lanes.length)];
+
+ // Keep cars from spawning too close together
+ const blocked=traffic.some(t=>
+   Math.abs(t.x-lane)<10 && t.y<150
+ );
+ if(!blocked){
+  const colors=["#ff4545","#44b7ff","#ffb22e",
+                "#b17aff","#f4f4f4","#35d7a0"];
+  traffic.push({
+   x:lane,y:-100,w:48,h:82,
+   color:colors[Math.floor(Math.random()*colors.length)],
+   extra:Math.random()*1.2
+  });
+ }
+}
+
+function startGame(){
+ traffic=[];
+ score=0;
+ speed=4;
+ frame=0;
+ roadOffset=0;
+ car.x=196;
+ running=true;
+ gameOver=false;
+ left=false;right=false;
+ lastTime=0;
+ message.classList.add("hidden");
+ scoreEl.textContent="0";
+ speedEl.textContent="1";
+ requestAnimationFrame(loop);
+}
+
+function endGame(){
+ running=false;
+ gameOver=true;
+
+ if(score>best){
+  best=score;
+  bestEl.textContent=best;
+  try{localStorage.setItem("meharBest",best)}catch(e){}
+ }
+
+ message.innerHTML=`
+ <div class="panel">
+  <h2>💥 GAME OVER</h2>
+  <p>Your Score: <strong>${score}</strong></p>
+  <p>Best Score: <strong>${best}</strong></p>
+  <button id="playAgain">PLAY AGAIN 🔄</button>
+ </div>`;
+ message.classList.remove("hidden");
+ document.getElementById("playAgain").onclick=startGame;
+}
+
+function update(dt){
+ frame+=dt;
+ roadOffset+=speed*dt;
+
+ // Move player
+ const moveSpeed=5.5*dt;
+ if(left) car.x-=moveSpeed;
+ if(right) car.x+=moveSpeed;
+
+ car.x=Math.max(road.x+12,
+       Math.min(road.x+road.width-car.w-12,car.x));
+
+ // Increase speed over time
+ speed=Math.min(11,4+score/150);
+ speedEl.textContent=Math.max(1,Math.floor(speed/2));
+
+ // Traffic spawning
+ if(frame>Math.max(30,75-score/4)){
+  spawnTraffic();
+  frame=0;
+ }
+
+ // Traffic movement
+ for(let i=traffic.length-1;i>=0;i--){
+  const t=traffic[i];
+  t.y+=(speed+t.extra)*dt;
+
+  // Collision detection
+  const padding=9;
+  if(
+   car.x+padding<t.x+t.w-padding &&
+   car.x+car.w-padding>t.x+padding &&
+   car.y+padding<t.y+t.h-padding &&
+   car.y+car.h-padding>t.y+padding
+  ){
+   endGame();
+   return;
+  }
+
+  if(t.y>660){
+   traffic.splice(i,1);
+   score+=10;
+   scoreEl.textContent=score;
+  }
+ }
+}
+
+function draw(){
+ drawRoad();
+
+ // Traffic cars
+ traffic.forEach(t=>drawCar(t.x,t.y,t.w,t.h,t.color));
+
+ // Player car
+ drawCar(car.x,car.y,car.w,car.h,"#ff3030",true);
+
+ // Small HUD label
+ ctx.fillStyle="#ffffffcc";
+ ctx.font="bold 13px Arial";
+ ctx.fillText("MEHAR RACING",15,25);
+}
+
+function loop(time){
+ if(!running)return;
+
+ const dt=lastTime?Math.min((time-lastTime)/16.67,2):1;
+ lastTime=time;
+
+ update(dt);
+ if(!running)return;
+
+ draw();
+ requestAnimationFrame(loop);
+}
+
+document.getElementById("play").onclick=startGame;
+document.getElementById("start").onclick=()=>{
+ if(!running)startGame();
+};
+
+function setButton(button,direction){
+ button.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(direction==="left")left=true;
+  else right=true;
+ });
+ ["pointerup","pointercancel","pointerleave"].forEach(ev=>{
+  button.addEventListener(ev,()=>{
+   if(direction==="left")left=false;
+   else right=false;
+  });
+ });
+}
+
+setButton(document.getElementById("left"),"left");
+setButton(document.getElementById("right"),"right");
+
+document.addEventListener("keydown",e=>{
+ if(["ArrowLeft","ArrowRight"," "].includes(e.key))
+  e.preventDefault();
+
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=true;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=true;
+
+ if((e.key==="Enter"||e.key===" ")&&!running)startGame();
+});
+
+document.addEventListener("keyup",e=>{
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=false;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=false;
+});
+
+// Initial screen
+draw();
+</script>
+</body>
+</html>
